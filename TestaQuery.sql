@@ -269,7 +269,77 @@ GROUP BY sod.UnitPrice
 ORDER BY sod.UnitPrice DESC;
 
 
--------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------
 --6. Försäljning och antal kunder per region
 -- Affärsfråga: Hur skiljer sig försäljningen mellan olika regioner, och hur många unika kunder har varje region?
+------------------------------------------------------------------------------------------------------------------
+
+SELECT TOP 50 * FROM Sales.Customer
+SELECT TOP 3 * FROM Sales.SalesOrderHeader
+SELECT TOP 20 * FROM Sales.SalesTerritory
+
+
+--Lägga in i ipynb
+SELECT
+    CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
+    COALESCE(SUM(soh.TotalDue), 0) AS TotalForsaljningRegion,
+    COUNT(DISTINCT c.CustomerID) AS UnikaKunderTotalt,
+    COUNT(DISTINCT soh.CustomerID) AS UnikaKunderMedOrder,
+    COUNT(soh.SalesOrderID) AS AntalOrdrar
+FROM Sales.SalesTerritory st
+LEFT JOIN Sales.Customer c
+    ON c.TerritoryID = st.TerritoryID
+LEFT JOIN Sales.SalesOrderHeader soh
+    ON soh.CustomerID = c.CustomerID
+GROUP BY st.CountryRegionCode, st.Name
+ORDER BY TotalForsaljningRegion DESC;
+
+
+--Kollar antal ordrar per kund
+SELECT
+    CustomerID,
+    COUNT(*) AS AntalOrdrar
+FROM Sales.SalesOrderHeader
+GROUP BY CustomerID
+HAVING COUNT(*) > 1
+ORDER BY AntalOrdrar DESC;
+
+
+-------------------------------------------------------------------------
+--7. Genomsnittligt ordervärde per region och kundtyp
+-- Affärsfråga: Vilka regioner har högst/lägst genomsnittligt ordervärde, 
+--och skiljer det sig mellan individuella kunder och företagskunder?
+-------------------------------------------------------------------------
+SELECT TOP 20 * FROM Sales.Store
+SELECT TOP 2 * FROM Sales.Customer
+SELECT TOP 100 * FROM Sales.SalesTerritory
+SELECT TOP 100 * FROM Sales.SalesOrderHeader 
+
+
+--Lägga in i ipynb
+SELECT
+    CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
+    CASE
+        WHEN c.StoreID IS NOT NULL THEN 'Företagskund'
+        WHEN c.PersonID IS NOT NULL THEN 'Privatkund'
+    END AS Kundtyp,
+
+    COALESCE(SUM(soh.TotalDue), 0) AS TotalForsaljning,
+    COUNT(DISTINCT soh.CustomerID) AS UnikaKunderMedOrder,
+    COUNT(soh.SalesOrderID) AS AntalOrdrar,
+    AVG(soh.TotalDue) AS GenomsnittligtOrderVarde   
+FROM Sales.SalesOrderHeader soh
+JOIN Sales.Customer c
+    ON soh.CustomerID = c.CustomerID
+JOIN Sales.SalesTerritory st
+    ON soh.TerritoryID = st.TerritoryID
+LEFT JOIN Sales.Store s
+    ON c.StoreID = s.BusinessEntityID
+GROUP BY st.CountryRegionCode, st.Name,
+    CASE
+        WHEN c.StoreID IS NOT NULL THEN 'Företagskund'
+        WHEN c.PersonID IS NOT NULL THEN 'Privatkund'
+    END   
+ORDER BY 
+    GenomsnittligtOrdervarde DESC;
 
