@@ -83,6 +83,7 @@ WHERE ToCurrencyCode = 'USD';
 
 --Kolla data i tabellen
 SELECT TOP 100 * FROM Sales.SalesOrderHeader
+SELECT TOP 20 * FROM Sales.Currency
 
 SELECT TOP 300 *
 FROM Sales.SalesOrderHeader
@@ -103,7 +104,7 @@ ORDER BY OrderMonth;
 --Lägg in i ipynb
 SELECT
     DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
-    SUM(TotalDue) AS TotalForsaljning,
+    SUM(SubTotal) AS TotalForsaljning,
     MIN(CAST(OrderDate AS date)) AS FirstOrderDateInMonth,
     MAX(CAST(OrderDate AS date)) AS LastOrderDateInMonth,
     CASE
@@ -116,7 +117,7 @@ GROUP BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
 ORDER BY OrderMonth;
 
 --Kontrollera att summeringen verkar korrekt.
-SELECT SUM(TotalDue) AS TotalSumma
+SELECT SUM(SubTotal) AS TotalSumma
 FROM Sales.SalesOrderHeader;
 
 SELECT SUM(MonthSum) AS TotalViaManader
@@ -124,7 +125,7 @@ FROM (
     SELECT
         YEAR(OrderDate) AS OrderYear,
         MONTH(OrderDate) AS OrderMonth,
-        SUM(TotalDue) AS MonthSum
+        SUM(SubTotal) AS MonthSum
     FROM Sales.SalesOrderHeader
     GROUP BY
         YEAR(OrderDate),
@@ -135,7 +136,7 @@ FROM (
 WITH MonthlySales AS (
     SELECT
         DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
-        SUM(TotalDue) AS TotalForsaljning,
+        SUM(SubTotal) AS TotalForsaljning,
         MIN(CAST(OrderDate AS date)) AS FirstOrderDateInMonth,
         MAX(CAST(OrderDate AS date)) AS LastOrderDateInMonth,
         CASE
@@ -164,7 +165,7 @@ WITH Monthly AS (
     SELECT
         DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
         YEAR(OrderDate) AS OrderYear,
-        SUM(TotalDue) AS TotalForsaljning,
+        SUM(SubTotal) AS TotalForsaljning,
         COUNT(*) AS AntalOrdrar,
         CASE
             WHEN MIN(CAST(OrderDate AS date)) = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
@@ -282,7 +283,7 @@ SELECT TOP 20 * FROM Sales.SalesTerritory
 --Lägga in i ipynb
 SELECT
     CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
-    COALESCE(SUM(soh.TotalDue), 0) AS TotalForsaljningRegion,
+    COALESCE(SUM(soh.SubTotal), 0) AS TotalForsaljningRegion,
     COUNT(DISTINCT c.CustomerID) AS UnikaKunderTotalt,
     COUNT(DISTINCT soh.CustomerID) AS UnikaKunderMedOrder,
     COUNT(soh.SalesOrderID) AS AntalOrdrar
@@ -317,29 +318,97 @@ SELECT TOP 100 * FROM Sales.SalesOrderHeader
 
 
 --Lägga in i ipynb
+WITH Base AS (
+    SELECT
+        CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
+        CASE
+            WHEN c.StoreID IS NOT NULL THEN 'Företagskund'
+            WHEN c.PersonID IS NOT NULL THEN 'Privatkund'
+            ELSE 'Okänd'
+        END AS Kundtyp,
+        soh.SubTotal,
+        soh.SalesOrderID
+    FROM Sales.SalesOrderHeader soh
+    JOIN Sales.Customer c ON soh.CustomerID = c.CustomerID
+    JOIN Sales.SalesTerritory st ON soh.TerritoryID = st.TerritoryID
+),
+Agg AS (
+    SELECT
+        Region,
+        Kundtyp,
+        SUM(SubTotal) AS TotalForsaljning,
+        COUNT(*) AS AntalOrdrar,
+        --1.0 gör så att det blir flyttalsdivision
+        SUM(SubTotal) * 1.0 / NULLIF(COUNT(*), 0) AS AOV_Kundtyp 
+    FROM Base
+    GROUP BY Region, Kundtyp
+),
+RegionTotal AS (
+    SELECT
+        Region,
+        SUM(TotalForsaljning) * 1.0 / NULLIF(SUM(AntalOrdrar), 0) AS AOV_Totalt
+    FROM Agg
+    GROUP BY Region
+)
 SELECT
-    CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
-    CASE
-        WHEN c.StoreID IS NOT NULL THEN 'Företagskund'
-        WHEN c.PersonID IS NOT NULL THEN 'Privatkund'
-    END AS Kundtyp,
+    a.Region,
+    a.Kundtyp,
+    a.AOV_Kundtyp,
+    rt.AOV_Totalt
+FROM Agg a
+JOIN RegionTotal rt ON a.Region = rt.Region
+ORDER BY rt.AOV_Totalt DESC, a.Region, a.Kundtyp;
 
-    COALESCE(SUM(soh.TotalDue), 0) AS TotalForsaljning,
-    COUNT(DISTINCT soh.CustomerID) AS UnikaKunderMedOrder,
-    COUNT(soh.SalesOrderID) AS AntalOrdrar,
-    AVG(soh.TotalDue) AS GenomsnittligtOrderVarde   
-FROM Sales.SalesOrderHeader soh
-JOIN Sales.Customer c
-    ON soh.CustomerID = c.CustomerID
-JOIN Sales.SalesTerritory st
-    ON soh.TerritoryID = st.TerritoryID
-LEFT JOIN Sales.Store s
-    ON c.StoreID = s.BusinessEntityID
-GROUP BY st.CountryRegionCode, st.Name,
-    CASE
-        WHEN c.StoreID IS NOT NULL THEN 'Företagskund'
-        WHEN c.PersonID IS NOT NULL THEN 'Privatkund'
-    END   
-ORDER BY 
-    GenomsnittligtOrdervarde DESC;
 
+---------------------------------------------------------------------
+--DJUPANALYS: ALTERNATIV A: Regional försäljningsoptimering
+---------------------------------------------------------------------
+WITH Monthly AS (
+    SELECT
+        CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
+        DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) AS OrderMonth,
+        YEAR(OrderDate) AS OrderYear,
+        SUM(SubTotal) AS TotalForsaljning
+        --COUNT(*) AS AntalOrdrar,
+        --CASE
+            --WHEN MIN(CAST(OrderDate AS date)) = DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1)
+             --AND MAX(CAST(OrderDate AS date)) = EOMONTH(DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1))
+            --THEN 1 ELSE 0
+        --END AS IsFullMonth
+    FROM Sales.SalesOrderHeader soh
+    JOIN Sales.SalesTerritory st ON soh.TerritoryID = st.TerritoryID
+    GROUP BY 
+        CONCAT(st.CountryRegionCode,'-', st.Name),
+        DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1), 
+        YEAR(OrderDate) 
+),
+MonthlyFlag AS (
+    SELECT
+        m.*,
+        CASE
+            WHEN m.OrderMonth > MIN(m.OrderMonth) OVER ()
+             AND m.OrderMonth < MAX(m.OrderMonth) OVER ()
+            THEN 1 ELSE 0
+        END AS IsFullMonth
+    FROM Monthly m
+),
+Yearly AS (
+    SELECT
+        Region,
+        OrderYear,
+
+        -- Alla månader (oavsett full/inte)
+        SUM(TotalForsaljning) AS TotalForsaljning_All,
+        --SUM(AntalOrdrar) AS AntalOrdrar_All,
+        COUNT(*) AS Manader_All,
+
+        -- Endast fulla månader
+        SUM(CASE WHEN IsFullMonth = 1 THEN TotalForsaljning ELSE 0 END) AS TotalForsaljning_Full,
+        --SUM(CASE WHEN IsFullMonth = 1 THEN AntalOrdrar      ELSE 0 END) AS AntalOrdrar_Full,
+        SUM(IsFullMonth) AS Manader_Full
+    FROM MonthlyFlag
+    GROUP BY Region, OrderYear
+)
+SELECT *
+FROM Yearly
+ORDER BY Region, OrderYear;
