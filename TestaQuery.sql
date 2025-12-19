@@ -363,6 +363,10 @@ ORDER BY rt.AOV_Totalt DESC, a.Region, a.Kundtyp;
 ---------------------------------------------------------------------
 --DJUPANALYS: ALTERNATIV A: Regional försäljningsoptimering
 ---------------------------------------------------------------------
+
+---------------------------------------------------------------------
+-- Vilken region presterar bäst/sämst?
+---------------------------------------------------------------------
 WITH Monthly AS (
     SELECT
         CONCAT(st.CountryRegionCode,'-', st.Name) AS Region,
@@ -412,3 +416,39 @@ Yearly AS (
 SELECT *
 FROM Yearly
 ORDER BY Region, OrderYear;
+
+
+---------------------------------------------------------------------
+-- Vilka produktkategorier säljer bäst var?
+---------------------------------------------------------------------
+WITH Base AS (
+    SELECT 
+        CONCAT(st.CountryRegionCode,'-', st.Name) AS Region, 
+        COALESCE(pc.Name, 'Saknar kategori') AS Kategori,
+        SUM(sod.LineTotal) AS SummaKategori
+    FROM Sales.SalesOrderDetail sod
+    INNER JOIN Production.Product p
+        ON sod.ProductID = p.ProductID
+    LEFT JOIN Production.ProductSubcategory ps 
+        ON p.ProductSubcategoryID = ps.ProductSubcategoryID
+    LEFT JOIN Production.ProductCategory pc 
+        ON ps.ProductCategoryID = pc.ProductCategoryID
+    INNER JOIN Sales.SalesOrderHeader soh 
+        ON sod.SalesOrderID = soh.SalesOrderID
+    INNER JOIN Sales.SalesTerritory st
+        ON soh.TerritoryID = st.TerritoryID
+    GROUP BY 
+        CONCAT(st.CountryRegionCode,'-', st.Name),
+        COALESCE(pc.Name, 'Saknar kategori')
+),
+WithTotals AS (
+    SELECT *,
+        SUM(SummaKategori) OVER (PARTITION BY Region)   AS RegionTotal,
+        SUM(SummaKategori) OVER (PARTITION BY Kategori) AS KategoriTotal
+    FROM Base
+)
+SELECT *
+FROM WithTotals
+ORDER BY
+    RegionTotal DESC,
+    KategoriTotal DESC;
