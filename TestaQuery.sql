@@ -452,3 +452,30 @@ FROM WithTotals
 ORDER BY
     RegionTotal DESC,
     KategoriTotal DESC;
+
+
+---------------------------------------------------------------------
+-- Finns säsongsmönster per region?
+---------------------------------------------------------------------
+WITH Monthly AS (
+    SELECT
+        CONCAT(st.CountryRegionCode, '-', st.Name) AS Region,
+        DATEFROMPARTS(YEAR(soh.OrderDate), MONTH(soh.OrderDate), 1) AS OrderMonth,
+        YEAR(soh.OrderDate)  AS OrderYear,
+        MONTH(soh.OrderDate) AS OrderMonthNum,
+        SUM(soh.SubTotal) AS TotalForsaljning
+    FROM Sales.SalesOrderHeader soh
+    JOIN Sales.SalesTerritory st
+        ON soh.TerritoryID = st.TerritoryID
+    GROUP BY
+        CONCAT(st.CountryRegionCode, '-', st.Name),
+        DATEFROMPARTS(YEAR(soh.OrderDate), MONTH(soh.OrderDate), 1),
+        YEAR(soh.OrderDate),
+        MONTH(soh.OrderDate)
+)
+SELECT *
+FROM Monthly
+-- Ta bort första och sista månaden, då vi sedan tidigare vet att de är ofullständiga
+WHERE OrderMonth > (SELECT MIN(OrderMonth) FROM Monthly)
+  AND OrderMonth < (SELECT MAX(OrderMonth) FROM Monthly)
+ORDER BY Region, OrderYear, OrderMonthNum;  
